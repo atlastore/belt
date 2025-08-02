@@ -1,4 +1,4 @@
-package server
+package options
 
 import (
 	"context"
@@ -8,19 +8,19 @@ import (
 	"google.golang.org/grpc"
 )
 
-type Option func(*config)
+type Option func(*Config)
 
-type config struct {
-	stopMonitoring []StopMonitoringFunc
-	fiberCfg fiber.Config
-	grpcOptions []grpc.ServerOption
-	registries []ServiceRegistry[any]
-	router Router
-	tlsConfig *tls.Config
+type Config struct {
+	StopMonitoring []StopMonitoringFunc
+	FiberCfg fiber.Config
+	GrpcOptions []grpc.ServerOption
+	Registries []ServiceRegistry[any]
+	Router Router
+	TlsConfig *tls.Config
 }
 
-func newConfig(opts []Option) config {
-	cfg := config{}
+func NewConfig(opts []Option) Config {
+	cfg := Config{}
 
 	for _, opt := range opts {
 		opt(&cfg)
@@ -43,20 +43,20 @@ type Router interface {
 }
 
 func WithFiberConfig(cfg fiber.Config) Option {
-	return func(c *config) {
-		c.fiberCfg = cfg
+	return func(c *Config) {
+		c.FiberCfg = cfg
 	}
 }
 
 func WithGrpcConfig(cfg ...grpc.ServerOption) Option {
-	return func(c *config) {
-		c.grpcOptions = cfg
+	return func(c *Config) {
+		c.GrpcOptions = cfg
 	}
 }
 
 func WithStopMonitor(fn StopMonitoringFunc) Option {
-	return func(c *config) {
-		c.stopMonitoring = append(c.stopMonitoring, fn)
+	return func(c *Config) {
+		c.StopMonitoring = append(c.StopMonitoring, fn)
 	}
 }
 
@@ -65,8 +65,8 @@ func WithGrpcRegistry[T any](service T, registrar RegisterFunc[T]) Option {
 		registrar(s, service)
 	}
 
-	return func(c *config) {
-		c.registries = append(c.registries, ServiceRegistry[any]{
+	return func(c *Config) {
+		c.Registries = append(c.Registries, ServiceRegistry[any]{
 			Service: service,
 			Registrar: wrappedRegistrar,
 		})
@@ -74,7 +74,7 @@ func WithGrpcRegistry[T any](service T, registrar RegisterFunc[T]) Option {
 }
 
 func WithGrpcRegistries(registries ...Option) Option {
-	return func(c *config) {
+	return func(c *Config) {
 		for _, opt := range registries {
 			opt(c)
 		}
@@ -82,13 +82,13 @@ func WithGrpcRegistries(registries ...Option) Option {
 }
 
 func WithRouter(r Router) Option {
-	return func(c *config) {
-		c.router = r
+	return func(c *Config) {
+		c.Router = r
 	}
 }
 
 func WithTLS(cfg *tls.Config) Option {
-	return func(c *config) {
-		c.tlsConfig = cfg
+	return func(c *Config) {
+		c.TlsConfig = cfg
 	}
 }

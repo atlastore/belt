@@ -11,7 +11,7 @@ import (
 func TestServer(t *testing.T) {
 	ctx := context.Background()
 	log := logx.New(ctx, logx.NewConfig(logx.Development, "master", uuid.NewString()), &logx.ConsoleTransport{})
-	server := NewServer(HTTP, log)
+	server := NewServer(MUX, log, )
 	err := server.Start(ctx, "localhost:4000")
 
 	if err != nil {

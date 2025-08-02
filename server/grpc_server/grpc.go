@@ -1,15 +1,18 @@
-package server
+package grpc_server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
-	"os"
-	"os/signal"
-	"syscall"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/atlastore/belt/logx"
+	"github.com/atlastore/belt/server/options"
+	"github.com/atlastore/belt/server/srv"
+	server_utils "github.com/atlastore/belt/server/utils"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -21,36 +24,37 @@ import (
 )
 
 var (
-	_ Server = &grpcServer{}
+	_ srv.Server = &GrpcServer{}
 )
 
-type grpcServer struct {
+type GrpcServer struct {
 	log *logx.Logger
 	server *grpc.Server
 	ln net.Listener
-	cfg config
-	stopMonitors []StopMonitoringFunc
+	cfg options.Config
+	stopMonitors []options.StopMonitoringFunc
 	healthServer *health.Server
+	applyMonitor bool
 }
 
-func newGrpcServer(log *logx.Logger, cfg config) *grpcServer {
-	cfg.grpcOptions = append(cfg.grpcOptions, 
+func New(log *logx.Logger, cfg options.Config, applyMonitor bool) *GrpcServer {
+	cfg.GrpcOptions = append(cfg.GrpcOptions, 
 		grpc.UnaryInterceptor(unaryLoggingInterceptor(log)), 
 		grpc.StreamInterceptor(streamLoggingInterceptor(log)),
 	)
 
-	if cfg.tlsConfig != nil {
-		creds := credentials.NewTLS(cfg.tlsConfig)
-		cfg.grpcOptions = append(cfg.grpcOptions, grpc.Creds(creds))
+	if cfg.TlsConfig != nil {
+		creds := credentials.NewTLS(cfg.TlsConfig)
+		cfg.GrpcOptions = append(cfg.GrpcOptions, grpc.Creds(creds))
 	}
 
-	server := grpc.NewServer(cfg.grpcOptions...)
+	server := grpc.NewServer(cfg.GrpcOptions...)
 
 	hs := health.NewServer()
 	grpc_health_v1.RegisterHealthServer(server, hs)
-	hs.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+	hs.SetServingStatus(log.Config().Service, grpc_health_v1.HealthCheckResponse_SERVING)
 
-	for _, reg := range cfg.registries {
+	for _, reg := range cfg.Registries {
 		reg.Registrar(server, reg.Service)
 	}
 
@@ -58,56 +62,77 @@ func newGrpcServer(log *logx.Logger, cfg config) *grpcServer {
 		reflection.Register(server)
 	}
 
-	return &grpcServer{
+	return &GrpcServer{
 		log: log,
 		server: server,
 		healthServer: hs,
 		cfg: cfg,
-		stopMonitors: cfg.stopMonitoring,
+		stopMonitors: cfg.StopMonitoring,
+		applyMonitor: applyMonitor,
 	}
 }
 
-func (gs *grpcServer) Start(ctx context.Context, addr string) error {
-	gs.print(addr)
+func (gs *GrpcServer) Start(ctx context.Context, addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
+
+	return gs.StartWithListener(ctx, ln)
+}
+
+func (gs *GrpcServer) StartWithListener(ctx context.Context, ln net.Listener) error {
+	gs.print(ln.Addr().String())
 	gs.ln = ln
 
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
-	defer cancel()
+	ctx, stop := server_utils.SignalContext(ctx)
+	defer stop()
 
-	for _ ,fn := range gs.cfg.stopMonitoring {
-		fn(ctx)
+	if gs.applyMonitor {
+		for _, fn := range gs.stopMonitors {
+			go fn(ctx)
+		}
 	}
 
-	errChan := make(chan error)
+	errChan := make(chan error, 1)
 
 	go func() {
-		if err := gs.server.Serve(ln); err != nil {
-			gs.log.Error("failed to start server", zap.String("id", gs.log.Config().InstanceID), zap.String("address", addr))
-			errChan <- fmt.Errorf("server error: %v", err)
+		err := gs.server.Serve(ln)
+		if err != nil && !strings.Contains(err.Error(), "listener closed") {
+			gs.log.Error("gRPC server failed", zap.String("id", gs.log.Config().InstanceID), zap.String("address", ln.Addr().String()), zap.Error(err))
+			errChan <- err
 		}
 	}()
 
+	var once sync.Once
+	var closeErr error
+
+	doClose := func() {
+		if err := gs.Close(); err != nil {
+			closeErr = err
+		}
+	}
+
 	select {
 	case <-ctx.Done():
-		gs.log.Info("Shutting down servers")
-
-		err := gs.Close()
-		if err != nil {
-			return  err
+		if !gs.applyMonitor {
+			return nil
 		}
-		gs.log.Info("Servers shut down cleanly.")
+		gs.log.Debug("gRPC shutdown initiated")
+		once.Do(doClose)
+		gs.log.Info("gRPC shutdown cleanly")
 
-		return  nil
+		return closeErr
 	case err := <-errChan:
+		once.Do(doClose)
+		if closeErr != nil {
+			return errors.Join(closeErr, err)
+		}
 		return err
 	}
 }
 
-func (gs *grpcServer) Close() error {
+func (gs *GrpcServer) Close() error {
 	gs.SetServing(false)
 	gs.server.GracefulStop()
 
@@ -115,21 +140,21 @@ func (gs *grpcServer) Close() error {
 		return nil
 	}
 
-	return gs.ln.Close()
+	return nil
 }
 
-func (gs *grpcServer) AddStopMonitoringFunc(fn StopMonitoringFunc) {
+func (gs *GrpcServer) AddStopMonitoringFunc(fn options.StopMonitoringFunc) {
 	gs.stopMonitors = append(gs.stopMonitors, fn)
 }
 
-func (gs *grpcServer) SetServing(isServing bool) {
+func (gs *GrpcServer) SetServing(isServing bool) {
 	status := grpc_health_v1.HealthCheckResponse_NOT_SERVING
 	if isServing {
 		status = grpc_health_v1.HealthCheckResponse_SERVING
 	}
-	gs.healthServer.SetServingStatus("", status)
+	gs.healthServer.SetServingStatus(gs.log.Config().Service, status)
 }
-func (gs *grpcServer) print(addr string) {
+func (gs *GrpcServer) print(addr string) {
 	fmt.Println("------------------------------------------------------------------------------------------------------")
 	gs.log.Info(fmt.Sprintf("Listening on: %s", addr))
 	fmt.Println("------------------------------------------------------------------------------------------------------")

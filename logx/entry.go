@@ -17,6 +17,7 @@ type LogEntry struct {
 	Fields     map[string]any
 	Service    string
 	InstanceID string
+	State      string
 }
 
 func (le *LogEntry) MarshalFields() ([]byte, error) {

@@ -12,10 +12,20 @@ type interceptCore struct {
 	droppedCount *int64
 	service string
 	instanceID string
+	state State
+	contextFields []zapcore.Field
 }
 
-func newInterceptCore(core zapcore.Core, queue chan LogEntry, droppedCount *int64, service, instanceID string) zapcore.Core {
-	return &interceptCore{core: core, logQueue: queue, droppedCount: droppedCount, service: service, instanceID: instanceID}
+func newInterceptCore(core zapcore.Core, queue chan LogEntry, droppedCount *int64, service, instanceID string, state State) zapcore.Core {
+	return &interceptCore{
+		core: core,
+		logQueue: queue,
+		droppedCount: droppedCount,
+		service: service,
+		instanceID: instanceID,
+		state: state,
+		contextFields: nil,
+	}
 }
 
 func (c *interceptCore) Enabled(level zapcore.Level) bool {
@@ -23,7 +33,18 @@ func (c *interceptCore) Enabled(level zapcore.Level) bool {
 }
 
 func (c *interceptCore) With(fields []zapcore.Field) zapcore.Core {
-	return newInterceptCore(c.core.With(fields), c.logQueue, c.droppedCount, c.service, c.instanceID)
+	newFields := append([]zapcore.Field{}, c.contextFields...)
+	newFields = append(newFields, fields...)
+
+	return &interceptCore{
+		core: c.core.With(fields),
+		logQueue: c.logQueue,
+		droppedCount: c.droppedCount,
+		service: c.service,
+		instanceID: c.instanceID,
+		state: c.state,
+		contextFields: newFields,
+	}
 }
 
 func (c *interceptCore) Check(entry zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore.CheckedEntry {
@@ -34,8 +55,10 @@ func (c *interceptCore) Check(entry zapcore.Entry, ce *zapcore.CheckedEntry) *za
 }
 
 func (c *interceptCore) Write(entry zapcore.Entry, fields []zapcore.Field) error {
+	allFields := append([]zapcore.Field{}, c.contextFields...) // copy to avoid side effects
+	allFields = append(allFields, fields...)
 	select {
-	case c.logQueue <- c.formatLogEntry(entry, fields):
+	case c.logQueue <- c.formatLogEntry(entry, allFields):
 	default:
 		// drop or log if queue full
 		atomic.AddInt64(c.droppedCount, 1)
@@ -58,6 +81,7 @@ func (c *interceptCore) formatLogEntry(entry zapcore.Entry, fields []zapcore.Fie
 		Fields: c.fieldsToMap(fields),
 		Service: c.service,
 		InstanceID: c.instanceID,
+		State: c.state.String(),
 	}
 }
 

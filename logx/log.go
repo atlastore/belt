@@ -50,12 +50,16 @@ func New(ctx context.Context, config Config, transport Transport, options ...zap
 	queue := make(chan LogEntry, 1000)
 
 	var dropped int64
-	intercept := newInterceptCore(base.Core(), queue, &dropped, config.Service, config.InstanceID)
+	intercept := newInterceptCore(base.Core(), queue, &dropped, config.Service, config.InstanceID, config.State)
 
 	ctx, cancel := context.WithCancel(ctx)
 
+	l := zap.New(intercept, options...)
+
+	structuredL := l.With(zap.String("service", config.Service), zap.String("instance ID", config.InstanceID), zap.String("state", config.State.String()))
+
 	lg := &Logger{
-		logger: zap.New(intercept, options...),
+		logger: structuredL,
 		cancel: cancel,
 		logQueue: queue,
 		droppedCount: dropped,
@@ -134,6 +138,20 @@ func (lg *Logger) Log(lvl zapcore.Level, msg string, fields ...zapcore.Field) {
 func (lg *Logger) Level() zapcore.Level  {
 	return lg.logger.Level()
 }
+
+func (lg *Logger) With(fields ...zap.Field) *Logger {
+	childLogger := lg.logger.With(fields...)
+	return &Logger{
+		logger:        childLogger,
+		cfg:           lg.cfg,
+		cancel:        lg.cancel,      // share same cancel function
+		logQueue:      lg.logQueue,    // share same queue
+		wg:            lg.wg,          // wait group not copied, since workers are shared
+		droppedCount:  lg.droppedCount, // atomic counter is shared
+		closed:        lg.closed,      // shared closed state
+	}
+}
+
 
 
 // Close syncs and flushes any buffered log entries while also closing all log workers.

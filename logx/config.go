@@ -12,6 +12,17 @@ const (
 	Production
 )
 
+func (s State) String() string {
+	switch s {
+	case Development:
+		return "development"
+	case Production:
+		return "production"
+	default:
+		return "unknown"
+	}
+}
+
 // Config is the internal config for setup for the logger.
 type Config struct {
 	State State

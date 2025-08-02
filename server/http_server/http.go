@@ -1,16 +1,18 @@
-package server
+package http_server
 
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
-	"os"
-	"os/signal"
-	"syscall"
+	"strings"
 	"time"
 
 	"github.com/atlastore/belt/logx"
+	"github.com/atlastore/belt/server/options"
+	"github.com/atlastore/belt/server/srv"
+	server_utils "github.com/atlastore/belt/server/utils"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/compress"
 	"github.com/gofiber/fiber/v3/middleware/recover"
@@ -18,19 +20,20 @@ import (
 )
 
 var (
-	_ Server = &httpServer{}
+	_ srv.Server = &HttpServer{}
 )
 
-type httpServer struct {
+type HttpServer struct {
 	log *logx.Logger
 	app *fiber.App
-	cfg config
-	stopMonitors []StopMonitoringFunc
+	cfg options.Config
+	stopMonitors []options.StopMonitoringFunc
 	ln net.Listener
+	applyMonitor bool
 }
 
-func newHttpServer(log *logx.Logger, cfg config) *httpServer {
-	app := fiber.New(cfg.fiberCfg)
+func New(log *logx.Logger, cfg options.Config, applyMonitor bool) *HttpServer {
+	app := fiber.New(cfg.FiberCfg)
 
 	app.Use(recover.New())
 	app.Use(loggingMiddleware(log))
@@ -44,79 +47,91 @@ func newHttpServer(log *logx.Logger, cfg config) *httpServer {
 		return c.SendStatus(fiber.StatusOK)
 	})
 
-	if cfg.router != nil {
-		cfg.router.RegisterRoutes(app)
+	if cfg.Router != nil {
+		cfg.Router.RegisterRoutes(app)
 	}
 
-	return &httpServer{
+	return &HttpServer{
 		log: log,
 		app: app,
 		cfg: cfg,
-		stopMonitors: cfg.stopMonitoring,
+		stopMonitors: cfg.StopMonitoring,
+		applyMonitor: applyMonitor,
 	}
 }
 
-func (hs *httpServer) Start(ctx context.Context, addr string) error {
-	hs.print(addr)
-
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
-	defer cancel()
-
-	for _ ,fn := range hs.cfg.stopMonitoring {
-		fn(ctx)
+func (hs *HttpServer) Start(ctx context.Context, addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
 	}
 
-	errChan := make(chan error)
-	
-	go func() {
-		ln, err := net.Listen("tcp", addr)
+	return hs.StartWithListener(ctx, ln)
+}
 
-		if err != nil {
-			hs.log.Error("failed to bind listener", zap.String("id", hs.log.Config().InstanceID), zap.Error(err))
-			errChan <- fmt.Errorf("failed to bind listener: %w", err)
-			return
+func (hs *HttpServer) StartWithListener(ctx context.Context, ln net.Listener) error {
+	hs.print(ln.Addr().String())
+
+	ctx, stop := server_utils.SignalContext(ctx)
+	defer stop()
+
+	if hs.applyMonitor {
+		for _, fn := range hs.stopMonitors {
+			go fn(ctx)
 		}
+	}
+
+	errChan := make(chan error, 1)
+
+	go func() {
 		listenCfg := fiber.ListenConfig{
 			DisableStartupMessage: true,
 			GracefulContext: ctx,
 		}
 
-		if hs.cfg.tlsConfig != nil {
-			ln = tls.NewListener(ln, hs.cfg.tlsConfig)
-			hs.log.Info("serving HTTP with TLS", zap.String("id", hs.log.Config().InstanceID))
+		if hs.cfg.TlsConfig != nil {
+			ln = tls.NewListener(ln, hs.cfg.TlsConfig)
+			hs.log.Info("serving HTTP with TLS")
 		}
 
-		if err := hs.app.Listener(ln, listenCfg); err != nil {
-			hs.log.Error("failed to start server", zap.String("id", hs.log.Config().InstanceID), zap.String("address", addr))
-			errChan <- fmt.Errorf("server error: %v", err)
+		err := hs.app.Listener(ln, listenCfg)
+		if err != nil && !strings.Contains(err.Error(), "listener closed") {
+			hs.log.Error("failed to start HTTP server", zap.String("address", ln.Addr().String()), zap.Error(err))
+			errChan <- err
 		}
 	}()
 
 	select {
 	case <-ctx.Done():
-		hs.log.Info("Shutting down servers")
-
+		if !hs.applyMonitor {
+			return nil
+		}
+		hs.log.Debug("HTTP shutdown initiated")
 		err := hs.Close()
 		if err != nil {
-			return  err
+			return err
 		}
-		hs.log.Info("Servers shut down cleanly.")
+		hs.log.Info("HTTP shutdown cleanly")
 
-		return  nil
+		return nil
 	case err := <-errChan:
+		err2 := hs.Close()
+		if err2 != nil {
+			return errors.Join(err, err2)
+		}
 		return err
 	}
 }
 
-func (hs *httpServer) Close() error {
+func (hs *HttpServer) Close() error {
 	return hs.app.Shutdown()
 }
 
-func (hs *httpServer) AddStopMonitoringFunc(fn StopMonitoringFunc) {
+func (hs *HttpServer) AddStopMonitoringFunc(fn options.StopMonitoringFunc) {
 	hs.stopMonitors = append(hs.stopMonitors, fn)
 }
 
-func (hs *httpServer) print(addr string) {
+func (hs *HttpServer) print(addr string) {
 	fmt.Println("------------------------------------------------------------------------------------------------------")
 	hs.log.Info(fmt.Sprintf("Listening on: http://%s ", addr))
 	fmt.Println("------------------------------------------------------------------------------------------------------")
