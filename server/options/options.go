@@ -42,48 +42,9 @@ type Router interface {
 	RegisterRoutes(app *fiber.App)
 }
 
-func WithFiberConfig(cfg fiber.Config) Option {
-	return func(c *Config) {
-		c.FiberCfg = cfg
-	}
-}
-
-func WithGrpcConfig(cfg ...grpc.ServerOption) Option {
-	return func(c *Config) {
-		c.GrpcOptions = cfg
-	}
-}
-
 func WithStopMonitor(fn StopMonitoringFunc) Option {
 	return func(c *Config) {
 		c.StopMonitoring = append(c.StopMonitoring, fn)
-	}
-}
-
-func WithGrpcRegistry[T any](service T, registrar RegisterFunc[T]) Option {
-	wrappedRegistrar := func (s grpc.ServiceRegistrar, _ any)  {
-		registrar(s, service)
-	}
-
-	return func(c *Config) {
-		c.Registries = append(c.Registries, ServiceRegistry[any]{
-			Service: service,
-			Registrar: wrappedRegistrar,
-		})
-	}
-}
-
-func WithGrpcRegistries(registries ...Option) Option {
-	return func(c *Config) {
-		for _, opt := range registries {
-			opt(c)
-		}
-	}
-}
-
-func WithRouter(r Router) Option {
-	return func(c *Config) {
-		c.Router = r
 	}
 }
 

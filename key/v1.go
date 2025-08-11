@@ -18,6 +18,7 @@ type KeyV1 struct {
 	NodeID uint64
 	DiskID uint64
 	Identifier []byte
+	IndexFileHash uint64
 }
 
 func (k *KeyV1) Version() Version {
@@ -27,16 +28,17 @@ func (k *KeyV1) Version() Version {
 func (k *KeyV1) EncodeBinary() ([]byte, error) {
 	identifierLen := uint16(len(k.Identifier))
 
-	bufLen := 4+2*8+identifierLen
+	bufLen := 4+3*8+identifierLen
 	buf := make([]byte, bufLen)
 
 	binary.BigEndian.PutUint16(buf[0:2],   k.Version().Output())
 	binary.BigEndian.PutUint16(buf[2:4],   identifierLen)
-	binary.BigEndian.PutUint64(buf[4:12],  k.NodeID)
-	binary.BigEndian.PutUint64(buf[12:20], k.DiskID)
+	binary.BigEndian.PutUint64(buf[4:12],  k.IndexFileHash)
+	binary.BigEndian.PutUint64(buf[12:20], k.NodeID)
+	binary.BigEndian.PutUint64(buf[20:28], k.DiskID)
 
 
-	copy(buf[20:20+identifierLen], k.Identifier[0:identifierLen])
+	copy(buf[28:28+identifierLen], k.Identifier[0:identifierLen])
 
 	return buf, nil
 }
@@ -53,16 +55,17 @@ func decodeV1(buf []byte) (VersionedKey, error) {
 
 	identifierLen := binary.BigEndian.Uint16(buf[0:2])
 
-
-	nodeId := binary.BigEndian.Uint64(buf[2:10])
-	diskId := binary.BigEndian.Uint64(buf[10:18])
+	indexFileHash := binary.BigEndian.Uint64(buf[2:10])
+	nodeId := binary.BigEndian.Uint64(buf[10:18])
+	diskId := binary.BigEndian.Uint64(buf[18:26])
 	
 	idBuf := make([]byte, identifierLen)
-	copy(idBuf[0:identifierLen], buf[18:18+identifierLen])
+	copy(idBuf[0:identifierLen], buf[26:26+identifierLen])
 
 	return &KeyV1{
 		NodeID: nodeId,
 		DiskID: diskId,
 		Identifier: idBuf,
+		IndexFileHash: indexFileHash,
 	}, nil
 }

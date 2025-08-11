@@ -1,4 +1,4 @@
-package grpc_server
+package grpc
 
 import (
 	"context"
@@ -24,10 +24,10 @@ import (
 )
 
 var (
-	_ srv.Server = &GrpcServer{}
+	_ srv.Server = &Server{}
 )
 
-type GrpcServer struct {
+type Server struct {
 	log *logx.Logger
 	server *grpc.Server
 	ln net.Listener
@@ -37,7 +37,7 @@ type GrpcServer struct {
 	applyMonitor bool
 }
 
-func New(log *logx.Logger, cfg options.Config, applyMonitor bool) *GrpcServer {
+func New(log *logx.Logger, cfg options.Config, applyMonitor bool) *Server {
 	cfg.GrpcOptions = append(cfg.GrpcOptions, 
 		grpc.UnaryInterceptor(unaryLoggingInterceptor(log)), 
 		grpc.StreamInterceptor(streamLoggingInterceptor(log)),
@@ -62,7 +62,7 @@ func New(log *logx.Logger, cfg options.Config, applyMonitor bool) *GrpcServer {
 		reflection.Register(server)
 	}
 
-	return &GrpcServer{
+	return &Server{
 		log: log,
 		server: server,
 		healthServer: hs,
@@ -72,7 +72,7 @@ func New(log *logx.Logger, cfg options.Config, applyMonitor bool) *GrpcServer {
 	}
 }
 
-func (gs *GrpcServer) Start(ctx context.Context, addr string) error {
+func (gs *Server) Start(ctx context.Context, addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -81,7 +81,7 @@ func (gs *GrpcServer) Start(ctx context.Context, addr string) error {
 	return gs.StartWithListener(ctx, ln)
 }
 
-func (gs *GrpcServer) StartWithListener(ctx context.Context, ln net.Listener) error {
+func (gs *Server) StartWithListener(ctx context.Context, ln net.Listener) error {
 	gs.print(ln.Addr().String())
 	gs.ln = ln
 
@@ -132,7 +132,7 @@ func (gs *GrpcServer) StartWithListener(ctx context.Context, ln net.Listener) er
 	}
 }
 
-func (gs *GrpcServer) Close() error {
+func (gs *Server) Close() error {
 	gs.SetServing(false)
 	gs.server.GracefulStop()
 
@@ -143,18 +143,18 @@ func (gs *GrpcServer) Close() error {
 	return nil
 }
 
-func (gs *GrpcServer) AddStopMonitoringFunc(fn options.StopMonitoringFunc) {
+func (gs *Server) AddStopMonitoringFunc(fn options.StopMonitoringFunc) {
 	gs.stopMonitors = append(gs.stopMonitors, fn)
 }
 
-func (gs *GrpcServer) SetServing(isServing bool) {
+func (gs *Server) SetServing(isServing bool) {
 	status := grpc_health_v1.HealthCheckResponse_NOT_SERVING
 	if isServing {
 		status = grpc_health_v1.HealthCheckResponse_SERVING
 	}
 	gs.healthServer.SetServingStatus(gs.log.Config().Service, status)
 }
-func (gs *GrpcServer) print(addr string) {
+func (gs *Server) print(addr string) {
 	fmt.Println("------------------------------------------------------------------------------------------------------")
 	gs.log.Info(fmt.Sprintf("Listening on: %s", addr))
 	fmt.Println("------------------------------------------------------------------------------------------------------")

@@ -7,4 +7,4 @@ func GenerateIdentifier(len uint16) []byte {
     rand.Read(token)
     
 	return token
-} 
+}

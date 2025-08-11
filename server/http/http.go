@@ -1,4 +1,4 @@
-package http_server
+package http
 
 import (
 	"context"
@@ -20,10 +20,10 @@ import (
 )
 
 var (
-	_ srv.Server = &HttpServer{}
+	_ srv.Server = &Server{}
 )
 
-type HttpServer struct {
+type Server struct {
 	log *logx.Logger
 	app *fiber.App
 	cfg options.Config
@@ -32,7 +32,7 @@ type HttpServer struct {
 	applyMonitor bool
 }
 
-func New(log *logx.Logger, cfg options.Config, applyMonitor bool) *HttpServer {
+func New(log *logx.Logger, cfg options.Config, applyMonitor bool) *Server {
 	app := fiber.New(cfg.FiberCfg)
 
 	app.Use(recover.New())
@@ -51,7 +51,7 @@ func New(log *logx.Logger, cfg options.Config, applyMonitor bool) *HttpServer {
 		cfg.Router.RegisterRoutes(app)
 	}
 
-	return &HttpServer{
+	return &Server{
 		log: log,
 		app: app,
 		cfg: cfg,
@@ -60,7 +60,7 @@ func New(log *logx.Logger, cfg options.Config, applyMonitor bool) *HttpServer {
 	}
 }
 
-func (hs *HttpServer) Start(ctx context.Context, addr string) error {
+func (hs *Server) Start(ctx context.Context, addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -69,7 +69,7 @@ func (hs *HttpServer) Start(ctx context.Context, addr string) error {
 	return hs.StartWithListener(ctx, ln)
 }
 
-func (hs *HttpServer) StartWithListener(ctx context.Context, ln net.Listener) error {
+func (hs *Server) StartWithListener(ctx context.Context, ln net.Listener) error {
 	hs.print(ln.Addr().String())
 
 	ctx, stop := server_utils.SignalContext(ctx)
@@ -123,15 +123,15 @@ func (hs *HttpServer) StartWithListener(ctx context.Context, ln net.Listener) er
 	}
 }
 
-func (hs *HttpServer) Close() error {
+func (hs *Server) Close() error {
 	return hs.app.Shutdown()
 }
 
-func (hs *HttpServer) AddStopMonitoringFunc(fn options.StopMonitoringFunc) {
+func (hs *Server) AddStopMonitoringFunc(fn options.StopMonitoringFunc) {
 	hs.stopMonitors = append(hs.stopMonitors, fn)
 }
 
-func (hs *HttpServer) print(addr string) {
+func (hs *Server) print(addr string) {
 	fmt.Println("------------------------------------------------------------------------------------------------------")
 	hs.log.Info(fmt.Sprintf("Listening on: http://%s ", addr))
 	fmt.Println("------------------------------------------------------------------------------------------------------")

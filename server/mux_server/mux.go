@@ -9,8 +9,8 @@ import (
 	"sync"
 
 	"github.com/atlastore/belt/logx"
-	"github.com/atlastore/belt/server/grpc_server"
-	"github.com/atlastore/belt/server/http_server"
+	"github.com/atlastore/belt/server/grpc"
+	"github.com/atlastore/belt/server/http"
 	"github.com/atlastore/belt/server/options"
 	"github.com/atlastore/belt/server/srv"
 	server_utils "github.com/atlastore/belt/server/utils"
@@ -25,8 +25,8 @@ var (
 type muxServer struct {
 	log *logx.Logger
 	cfg options.Config
-	grpcS *grpc_server.GrpcServer
-	httpS *http_server.HttpServer
+	grpcS *grpc.Server
+	httpS *http.Server
 	m cmux.CMux
 	ln net.Listener
 }
@@ -64,8 +64,8 @@ func (m *muxServer) Start(ctx context.Context, addr string) error {
 	grpcLog := m.log.With(zap.String("component", "grpc"))
 	httpLog := m.log.With(zap.String("component", "http"))
 
-	m.grpcS = grpc_server.New(grpcLog, m.cfg, false)
-	m.httpS = http_server.New(httpLog, m.cfg, false)
+	m.grpcS = grpc.New(grpcLog, m.cfg, false)
+	m.httpS = http.New(httpLog, m.cfg, false)
 
 	for _, fn := range m.cfg.StopMonitoring {
 		go fn(ctx)

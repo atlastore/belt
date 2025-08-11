@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"hash/fnv"
 	"testing"
+
+	"github.com/atlastore/belt/hashx"
 )
 
 func TestKey(t *testing.T) {
@@ -13,7 +15,7 @@ func TestKey(t *testing.T) {
 	})
 
 	data, err := kf.EncodeKey(&KeyV1{
-		// Data: uint16(57874),
+		IndexFileHash: hashx.FNV64.HashString("test_file"),
 		Identifier: GenerateIdentifier(16),
 	})
 	if err != nil {

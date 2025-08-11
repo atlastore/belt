@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/atlastore/belt/logx"
-	"github.com/atlastore/belt/server/grpc_server"
-	"github.com/atlastore/belt/server/http_server"
+	"github.com/atlastore/belt/server/grpc"
+	"github.com/atlastore/belt/server/http"
 	"github.com/atlastore/belt/server/mux_server"
 	"github.com/atlastore/belt/server/options"
 	"go.uber.org/zap"
@@ -42,9 +42,9 @@ func NewServer(t Type, log *logx.Logger, opts ...options.Option) Server {
 	cfg := options.NewConfig(opts)
 	switch t {
 	case GRPC:
-		return grpc_server.New(log, cfg, true)
+		return grpc.New(log, cfg, true)
 	case HTTP:
-		return http_server.New(log, cfg, true)
+		return http.New(log, cfg, true)
 	case MUX:
 		return mux_server.New(log, cfg)
 	default:
