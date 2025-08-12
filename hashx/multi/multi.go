@@ -19,7 +19,7 @@ func HashString[T hashx.AnyHashAlgorithm](str string, algs ...T) ([]string, erro
 }
 
 func Hash[T hashx.AnyHashAlgorithm](data []byte, algs ...T) ([]string, error) {
-	hs, err := newHashers(algs...)
+	hs, err := NewHashers(algs...)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +33,7 @@ func Hash[T hashx.AnyHashAlgorithm](data []byte, algs ...T) ([]string, error) {
 }
 
 func HashReader[T hashx.AnyHashAlgorithm](r io.Reader, algs ...T) ([]string, error) {
-	hs, err := newHashers(algs...)
+	hs, err := NewHashers(algs...)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (ah *algoHasher[T]) Len() int {
 	 return len(ah.algos)
 }
 
-func newHashers[T hashx.AnyHashAlgorithm](algs ...T) (algoHasher[T], error) {
+func NewHashers[T hashx.AnyHashAlgorithm](algs ...T) (algoHasher[T], error) {
 	hs := algoHasher[T]{
 		algos: make([]T, len(algs)),
 		hashers: make([]hash.Hash, len(algs)),
